@@ -10,18 +10,17 @@ st.set_page_config(
 )
 
 # --- CONFIGURATION GOOGLE SHEETS ---
-# ID extrait de ton lien de partage
 SHEET_ID = "1l4CPiJ11n-zhB5RYsAHqOjp5Y7Mm2NOoTlihNAvrTCg"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 
 SECTEUR_LBC = "Roncq_59223__30000"  # Roncq + 30 km
 
-@st.cache_data(ttl=60) # Cache de 60 secondes pour rafraîchir en direct si tu modifies ton Sheets
+@st.cache_data(ttl=30)
 def load_sheet_data():
     """Charge les données directement depuis ton Google Sheets 'Concurrence Switch Auto'."""
     try:
         df = pd.read_csv(SHEET_URL)
-        # Nettoyage des noms de colonnes (minuscules et sans espaces)
+        # Nettoyage des noms de colonnes
         df.columns = [c.strip().lower() for c in df.columns]
         return df
     except Exception as e:
@@ -35,15 +34,14 @@ if "selected_car" not in st.session_state:
 st.title("🚗 Switch Auto — Radar Mandats Simples (Google Sheets)")
 st.caption("Base de données centralisée : Concurrence Roncq + 30 km")
 
-# Barre latérale : Infos et lien direct vers le Sheet
+# Barre latérale
 st.sidebar.header("📁 Source des données")
 st.sidebar.markdown(f"[🔗 Ouvrir ton Google Sheets 'Concurrence'](https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit)")
 
-if st.sidebar.button("🔄 Rafraîchir les données du Sheets", type="primary"):
+if st.sidebar.button("🔄 Rafraîchir les données", type="primary"):
     st.cache_data.clear()
     st.rerun()
 
-# Chargement du DataFrame depuis le Sheets
 df_pros = load_sheet_data()
 
 # --- LAYOUT EN DEUX COLONNES ---
@@ -60,16 +58,19 @@ with col_left:
         
         for idx, row in df_pros.iterrows():
             with st.container():
-                # Récupération sécurisée des colonnes
-                title = row.get("title", "Véhicule sans titre")
-                make = row.get("make", "")
-                model = row.get("model", "")
-                year = row.get("year", "")
+                title = str(row.get("title", "Véhicule sans titre"))
+                make = str(row.get("make", ""))
+                model = str(row.get("model", ""))
+                year = str(row.get("year", ""))
+                
+                # Ignorer les lignes vides
+                if title == "nan" or not title:
+                    continue
                 
                 c1, c2, c3, c4 = st.columns([3, 1.5, 1.5, 1.5])
                 with c1:
                     st.markdown(f"**{title}**")
-                    st.caption(f"{make} {model}")
+                    st.caption(f"Marque/Modèle : {make} {model}")
                 with c2:
                     st.write(f"📅 {year}")
                 with c3:
@@ -80,7 +81,7 @@ with col_left:
                         st.rerun()
                 st.markdown("---")
     else:
-        st.warning("⚠️ Ton Google Sheets semble vide ou inaccessible. Vérifie qu'il contient bien les colonnes `title`, `make`, `model`, `year` et qu'il est partagé en mode public.")
+        st.warning("⚠️ Ton Google Sheets semble vide. Remplis-le bien avec les colonnes `title`, `make`, `model`, `year`.")
 
 # ==============================================================================
 # COLONNE DROITE : FENÊTRE MIROIR PARTICULIER
@@ -91,7 +92,7 @@ with col_right:
     car = st.session_state["selected_car"]
     
     if car is not None:
-        title = car.get("title", "")
+        title = str(car.get("title", ""))
         make = str(car.get("make", "")).strip()
         model = str(car.get("model", "")).strip()
         year_val = str(car.get("year", "")).strip()
