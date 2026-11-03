@@ -2,125 +2,128 @@ import streamlit as st
 import pandas as pd
 import urllib.parse
 import re
-import requests
-import random
-import time
 
 # Configuration de la page Streamlit
 st.set_page_config(
-    page_title="Switch Auto — Matcher Miroir Pro/Particulier",
+    page_title="Switch Auto — Matcher Miroir Souple",
     page_icon="🚗",
     layout="wide"
 )
 
 # --- CONSTANTES MYTRAX ---
 SECTEUR_LBC = "Roncq_59223__30000"  # Roncq + 30 km
-ANNEE_MIN = 2006
-KM_MAX = 250000
 
-# User-Agents pour la rotation des requêtes
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-]
-
-def fetch_lbc_pro_ads():
-    """Scraper tolérant les protections anti-bot pour extraire le flux Pros."""
-    session = requests.Session()
-    headers = {
-        "User-Agent": random.choice(USER_AGENTS),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": "https://www.leboncoin.fr/",
-    }
-    
-    url = f"https://www.leboncoin.fr/recherche?category=2&owner_type=pro&regdate={ANNEE_MIN}-max&mileage=min-{KM_MAX}&locations={SECTEUR_LBC}"
-    
+def parse_lbc_paste(raw_text):
+    """Parseur intelligent et stable pour traiter le copier-coller de la page pro."""
     vehicles = []
-    try:
-        res = session.get(url, headers=headers, timeout=10)
-        if res.status_code == 200:
-            html = res.text
-            # Découpage du HTML pour extraire le JSON embarqué (__NEXT_DATA__)
-            json_match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html)
-            if json_match:
-                import json
-                data = json.loads(json_match.group(1))
-                ads = data.get("props", {}).get("pageProps", {}).get("searchData", {}).get("ads", [])
+    lines = [l.strip() for l in raw_text.split("\n") if l.strip()]
+    
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        price_match = re.search(r"(\d+[\s.]?\d*)\s*€", line)
+        
+        if price_match:
+            price_str = f"{price_match.group(1)} €"
+            
+            # Recherche du titre du véhicule
+            title = ""
+            for offset in range(1, 6):
+                if i - offset >= 0:
+                    candidate = lines[i - offset]
+                    if not re.search(r"€|Voitures|aujourd'hui|hier|Filtres|annonces|Tri :|\d+\s*€|Baisse de prix", candidate, re.IGNORECASE) and len(candidate) > 3:
+                        title = candidate
+                        break
+            
+            if title and title != "Véhicule inconnu":
+                parts = title.split()
+                make = parts[0] if len(parts) > 0 else "Auto"
+                model = parts[1] if len(parts) > 1 else ""
                 
-                for ad in ads:
-                    title = ad.get("subject", "")
-                    price = ad.get("price", [0])[0] if isinstance(ad.get("price"), list) else ad.get("price", 0)
-                    url_ad = ad.get("url", "")
-                    attributes = {attr.get("key"): attr.get("value") for attr in ad.get("attributes", [])}
-                    
-                    make = attributes.get("brand", "")
-                    model = attributes.get("model", "")
-                    year = attributes.get("regdate", "")
-                    km = attributes.get("mileage", "")
-                    
-                    if not make and title:
-                        parts = title.split()
-                        make = parts[0] if len(parts) > 0 else "Auto"
-                        model = parts[1] if len(parts) > 1 else ""
+                # Extraction Année et KM dans les lignes adjacentes
+                year = "2015"
+                km_str = "100000"
+                
+                for check_idx in range(max(0, i-4), min(len(lines), i+4)):
+                    year_m = re.search(r"\b(20[0-2]\d)\b", lines[check_idx])
+                    km_m = re.search(r"(\d+[\s.]?\d*)\s*(km|KM)", lines[check_idx], re.IGNORECASE)
+                    if year_m:
+                        year = year_m.group(1)
+                    if km_m:
+                        km_str = re.sub(r"\D", "", km_m.group(1))
 
-                    vehicles.append({
-                        "title": title,
-                        "make": make,
-                        "model": model,
-                        "price": f"{price:,} €".replace(",", " ") if price else "N.C.",
-                        "year": str(year) if year else "N.C.",
-                        "km": str(km) if km else "N.C.",
-                        "url_pro": url_ad if url_ad.startswith("http") else f"https://www.leboncoin.fr{url_ad}"
-                    })
-    except Exception:
-        pass
+                query_pro = urllib.parse.quote(f"{title}".strip())
+                pro_url = f"https://www.leboncoin.fr/recherche?category=2&owner_type=pro&text={query_pro}&locations={SECTEUR_LBC}"
+
+                vehicles.append({
+                    "title": title,
+                    "make": make,
+                    "model": model,
+                    "price": price_str,
+                    "year": year,
+                    "km": km_str,
+                    "url_pro": pro_url
+                })
+        i += 1
         
     return pd.DataFrame(vehicles)
 
-# Initialisation de la mémoire d'annonces
-if "pro_data" not in st.session_state:
-    st.session_state["pro_data"] = pd.DataFrame()
+# Initialisation du stockage de session
+if "pro_inventory" not in st.session_state:
+    st.session_state["pro_inventory"] = pd.DataFrame()
 
 if "selected_car" not in st.session_state:
     st.session_state["selected_car"] = None
 
-st.title("🚗 Switch Auto — Sourcing Pros & Matcher Miroir Automatique")
-st.caption("AutoScout CRM Mode : Roncq + 30 km | Année ≥ 2006 | KM ≤ 250 000 km")
+st.title("🚗 Switch Auto — Matcher Miroir Souple (Anti-Bug)")
+st.caption("Filtres MyTrax : Roncq + 30 km | Tolérance delta année & kilométrage")
 
-# Barre latérale : Actions
-st.sidebar.header("🔄 Contrôle du Scraper")
-if st.sidebar.button("🔄 Lancer / Rafraîchir les annonces Pros", type="primary"):
-    with st.spinner("Scraping en cours des annonces pros sur Roncq + 30 km..."):
-        df_fetched = fetch_lbc_pro_ads()
-        if len(df_fetched) > 0:
-            st.session_state["pro_data"] = df_fetched
-            st.sidebar.success(f"{len(df_fetched)} annonces pros récupérées !")
+# --- BARRE LATÉRALE : IMPORT DU STOCK PRO ---
+st.sidebar.header("1. Importer les annonces Pros")
+st.sidebar.markdown("[🔍 Ouvrir le flux Pros LeBonCoin (Roncq +30km)](https://www.leboncoin.fr/recherche?category=2&owner_type=pro&regdate=2006-max&mileage=min-250000&locations=Roncq_59223__30000)")
+
+raw_paste = st.sidebar.text_area(
+    "Copie-colle le texte de la page LeBonCoin Pros ici (Ctrl+A puis Ctrl+C) :",
+    height=200,
+    placeholder="Fais Ctrl+A puis Ctrl+C sur la page de recherche LeBonCoin Pros et colle ici..."
+)
+
+if st.sidebar.button("📥 Charger le tableau", type="primary"):
+    if raw_paste:
+        df_extracted = parse_lbc_paste(raw_paste)
+        if len(df_extracted) > 0:
+            st.session_state["pro_inventory"] = df_extracted
+            st.sidebar.success(f"🎉 {len(df_extracted)} annonces chargées !")
         else:
-            st.sidebar.warning("Blocage réseau détecté. Utilisation des données de secours.")
+            st.sidebar.error("Aucune annonce détectée. Vérifie ton copier-coller.")
+    else:
+        st.sidebar.error("Colle d'abord le texte de la page.")
 
-df_display = st.session_state["pro_data"]
+if st.sidebar.button("🗑️ Vider la liste"):
+    st.session_state["pro_inventory"] = pd.DataFrame()
+    st.session_state["selected_car"] = None
+    st.rerun()
 
-# --- LAYOUT DOUBLE COLONNE ---
-col_left, col_right = st.columns([1.3, 1], gap="large")
+df_pros = st.session_state["pro_inventory"]
+
+# --- INTERFACE EN 2 COLONNES ---
+col_list, col_match = st.columns([1.3, 1], gap="large")
 
 # ==============================================================================
-# COLONNE GAUCHE : FLUX DES ANNONCES PROFESSIONNELLES
+# COLONNE GAUCHE : TABLEAU DES ANNONCES PROS
 # ==============================================================================
-with col_left:
+with col_list:
     st.header("📋 Annonces Pros du Secteur (Roncq +30 km)")
     
-    if len(df_display) > 0:
-        st.write("Clique sur **« 🔍 Miroir »** pour afficher la recherche Particulier à droite :")
+    if len(df_pros) > 0:
+        st.write("Clique sur **« 🔍 Miroir »** sur la ligne du véhicule à analyser :")
         
-        # Affichage sous forme de tableau interactif avec boutons par ligne
-        for idx, row in df_display.iterrows():
+        for idx, row in df_pros.iterrows():
             with st.container():
                 c1, c2, c3, c4, c5 = st.columns([3, 1.5, 1.5, 1.5, 2])
                 with c1:
                     st.markdown(f"**{row['title']}**")
-                    st.caption(f"[🔗 Lien Annonce Pro]({row['url_pro']})")
+                    st.caption(f"[🔗 Voir Pro]({row['url_pro']})")
                 with c2:
                     st.write(f"💰 {row['price']}")
                 with c3:
@@ -133,12 +136,12 @@ with col_left:
                         st.rerun()
                 st.markdown("---")
     else:
-        st.info("Clique sur **« 🔄 Lancer / Rafraîchir les annonces Pros »** dans le menu de gauche pour charger le catalogue automatique.")
+        st.info("👈 **Mode d'emploi :**\n1. Ouvre le lien pro dans la barre latérale.\n2. Fais `Ctrl+A` puis `Ctrl+C` sur la page.\n3. Colle le tout à gauche et clique sur **Charger le tableau**.")
 
 # ==============================================================================
-# COLONNE DROITE : FENÊTRE MIROIR PARTICULIERS (SE DÉCLENCHE AU CLIC)
+# COLONNE DROITE : FENÊTRE MIROIR PARTICULIERS ( AVEC DELTA )
 # ==============================================================================
-with col_right:
+with col_match:
     st.header("👤 Recherche Miroir Particuliers")
     
     car = st.session_state["selected_car"]
@@ -146,18 +149,20 @@ with col_right:
     if car is not None:
         make = car["make"]
         model = car["model"]
+        
+        # Sécurisation des valeurs numériques pour appliquer le delta
         year_val = int(car["year"]) if str(car["year"]).isdigit() else 2015
         km_val = int(car["km"]) if str(car["km"]).isdigit() else 100000
         
-        # Plages de tolérance (+/- 1 an et +/- 5 000 km)
+        # Application du delta (Tolérance +/- 1 an et +/- 5000 km pour ne rien rater)
         year_min = max(2006, year_val - 1)
         year_max = year_val + 1
         km_min = max(0, km_val - 5000)
-        km_max = min(250000, km_val + 5000)
+        km_max = km_val + 5000
         
         query_encoded = urllib.parse.quote(f"{make} {model}".strip())
         
-        # URL LeBonCoin Particuliers ciblée
+        # URL LeBonCoin Particuliers avec delta
         lbc_part_url = (
             f"https://www.leboncoin.fr/recherche?"
             f"category=2"
@@ -168,7 +173,7 @@ with col_right:
             f"&locations={SECTEUR_LBC}"
         )
         
-        # URL La Centrale Particuliers
+        # URL La Centrale Particuliers avec delta
         lc_params = {
             "makesModelsCommercialNames": f"{make}:{model}",
             "yearMin": year_min,
@@ -182,11 +187,10 @@ with col_right:
         st.success(f"🎯 **Cible sélectionnée :** {car['title']}")
         
         st.markdown(f"""
-        **Critères de recherche Particuliers appliqués :**
-        * **Marque / Modèle :** `{make} {model}`
+        **Critères avec delta appliqués (Particuliers Roncq +30 km) :**
+        * **Modèle :** `{make} {model}`
         * **Tranche d'Année :** `{year_min} - {year_max}`
-        * **Tranche Kilométrage :** `{km_min:,}` à `{km_max:,}` km
-        * **Secteur :** `Roncq + 30 km`
+        * **Tranche KM :** `{km_min:,}` à `{km_max:,}` km
         """.replace(",", " "))
         
         st.markdown("---")
@@ -208,7 +212,7 @@ with col_right:
         
         st.info("""
         **💡 Action Prospection :**  
-        Si le véhicule sort publié par un particulier sur le même secteur à un tarif inférieur, tu as identifié le mandat non-exclusif !
+        Ce delta souple te permet de tomber immédiatement sur l'annonce du particulier même si son kilométrage affiché varie de quelques milliers de kilomètres !
         """)
     else:
-        st.warning("👈 Clique sur le bouton **« 🔍 Miroir »** à côté d'une annonce pro dans le tableau de gauche pour faire poper sa recherche Particuliers ici.")
+        st.warning("👈 Clique sur le bouton **« 🔍 Miroir »** à côté d'une annonce pro dans le tableau de gauche pour activer les liens miroirs ici.")
