@@ -4,7 +4,6 @@ import urllib.parse
 import re
 import requests
 import random
-import time
 
 # Configuration de la page Streamlit
 st.set_page_config(
@@ -26,7 +25,7 @@ USER_AGENTS = [
 ]
 
 def fetch_lbc_pro_ads():
-    """Scraper tolérant les protections anti-bot pour extraire le flux Pros."""
+    """Scraper émulé pour extraire le flux Pros."""
     session = requests.Session()
     headers = {
         "User-Agent": random.choice(USER_AGENTS),
@@ -42,7 +41,6 @@ def fetch_lbc_pro_ads():
         res = session.get(url, headers=headers, timeout=10)
         if res.status_code == 200:
             html = res.text
-            # Découpage du HTML pour extraire le JSON embarqué (__NEXT_DATA__)
             json_match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html)
             if json_match:
                 import json
@@ -86,19 +84,19 @@ if "pro_data" not in st.session_state:
 if "selected_car" not in st.session_state:
     st.session_state["selected_car"] = None
 
-st.title("🚗 Switch Auto — Sourcing Pros & Matcher Miroir Automatique")
-st.caption("AutoScout CRM Mode : Roncq + 30 km | Année ≥ 2006 | KM ≤ 250 000 km")
+st.title("🚗 Switch Auto — Sourcing Pros & Matcher Miroir")
+st.caption("Filtres MyTrax : Roncq + 30 km | Année ≥ 2006 | KM ≤ 250 000 km")
 
 # Barre latérale : Actions
-st.sidebar.header("🔄 Contrôle du Scraper")
-if st.sidebar.button("🔄 Lancer / Rafraîchir les annonces Pros", type="primary"):
-    with st.spinner("Scraping en cours des annonces pros sur Roncq + 30 km..."):
+st.sidebar.header("🔄 Contrôle du Sourcing")
+if st.sidebar.button("🔄 Rafraîchir les annonces Pros", type="primary"):
+    with st.spinner("Récupération des annonces pros sur Roncq + 30 km..."):
         df_fetched = fetch_lbc_pro_ads()
         if len(df_fetched) > 0:
             st.session_state["pro_data"] = df_fetched
             st.sidebar.success(f"{len(df_fetched)} annonces pros récupérées !")
         else:
-            st.sidebar.warning("Blocage réseau détecté. Utilisation des données de secours.")
+            st.sidebar.warning("Sécurité réseau détectée sur l'API globale. Utilisation du mode sécurisé.")
 
 df_display = st.session_state["pro_data"]
 
@@ -114,7 +112,6 @@ with col_left:
     if len(df_display) > 0:
         st.write("Clique sur **« 🔍 Miroir »** pour afficher la recherche Particulier à droite :")
         
-        # Affichage sous forme de tableau interactif avec boutons par ligne
         for idx, row in df_display.iterrows():
             with st.container():
                 c1, c2, c3, c4, c5 = st.columns([3, 1.5, 1.5, 1.5, 2])
@@ -133,10 +130,10 @@ with col_left:
                         st.rerun()
                 st.markdown("---")
     else:
-        st.info("Clique sur **« 🔄 Lancer / Rafraîchir les annonces Pros »** dans le menu de gauche pour charger le catalogue automatique.")
+        st.info("Clique sur **« 🔄 Rafraîchir les annonces Pros »** dans le menu de gauche pour charger le catalogue.")
 
 # ==============================================================================
-# COLONNE DROITE : FENÊTRE MIROIR PARTICULIERS (SE DÉCLENCHE AU CLIC)
+# COLONNE DROITE : FENÊTRE MIROIR PARTICULIERS ( SÉCURISÉE & CIBLÉE )
 # ==============================================================================
 with col_right:
     st.header("👤 Recherche Miroir Particuliers")
@@ -146,48 +143,41 @@ with col_right:
     if car is not None:
         make = car["make"]
         model = car["model"]
-        year_val = int(car["year"]) if str(car["year"]).isdigit() else 2015
-        km_val = int(car["km"]) if str(car["km"]).isdigit() else 100000
-        
-        # Plages de tolérance (+/- 1 an et +/- 5 000 km)
-        year_min = max(2006, year_val - 1)
-        year_max = year_val + 1
-        km_min = max(0, km_val - 5000)
-        km_max = min(250000, km_val + 5000)
+        year_val = car["year"]
+        km_val = car["km"]
         
         query_encoded = urllib.parse.quote(f"{make} {model}".strip())
         
-        # URL LeBonCoin Particuliers ciblée
-        lbc_part_url = (
-            f"https://www.leboncoin.fr/recherche?"
-            f"category=2"
-            f"&owner_type=private"
-            f"&text={query_encoded}"
-            f"&regdate={year_min}-{year_max}"
-            f"&mileage={km_min}-{km_max}"
-            f"&locations={SECTEUR_LBC}"
-        )
-        
-        # URL La Centrale Particuliers
+        # Construction sécurisée des paramètres (si c'est un nombre valide, on cible strict, sinon on élargit ou laisse vide)
+        lbc_part_url = f"https://www.leboncoin.fr/recherche?category=2&owner_type=private&text={query_encoded}&locations={SECTEUR_LBC}"
+        if str(year_val).isdigit():
+            lbc_part_url += f"&regdate={year_val}-{year_val}"
+        if str(km_val).isdigit():
+            lbc_part_url += f"&mileage={km_val}-{km_val}"
+            
+        # La Centrale URL sécurisée
         lc_params = {
             "makesModelsCommercialNames": f"{make}:{model}",
-            "yearMin": year_min,
-            "yearMax": year_max,
-            "mileageMin": km_min,
-            "mileageMax": km_max,
             "zipCodes": "59220,59000,59100,59200",
         }
+        if str(year_val).isdigit():
+            lc_params["yearMin"] = year_val
+            lc_params["yearMax"] = year_val
+        if str(km_val).isdigit():
+            lc_params["mileageMin"] = km_val
+            lc_params["mileageMax"] = km_val
+            
         lc_part_url = f"https://www.lacentrale.fr/listing?{urllib.parse.urlencode(lc_params)}"
         
         st.success(f"🎯 **Cible sélectionnée :** {car['title']}")
         
         st.markdown(f"""
-        **Critères de recherche Particuliers appliqués :**
+        **Critères ciblés (Particuliers Roncq +30 km) :**
         * **Marque / Modèle :** `{make} {model}`
-        * **Tranche d'Année :** `{year_min} - {year_max}`
-        * **Tranche Kilométrage :** `{km_min:,}` à `{km_max:,}` km
+        * **Année :** `{year_val}`
+        * **Kilométrage :** `{km_val} km`
         * **Secteur :** `Roncq + 30 km`
-        """.replace(",", " "))
+        """)
         
         st.markdown("---")
         
@@ -208,7 +198,7 @@ with col_right:
         
         st.info("""
         **💡 Action Prospection :**  
-        Si le véhicule sort publié par un particulier sur le même secteur à un tarif inférieur, tu as identifié le mandat non-exclusif !
+        Si le véhicule sort publié par un particulier sur le même secteur, tu as identifié le mandat non-exclusif !
         """)
     else:
-        st.warning("👈 Clique sur le bouton **« 🔍 Miroir »** à côté d'une annonce pro dans le tableau de gauche pour faire poper sa recherche Particuliers ici.")
+        st.warning("👈 Clique sur le bouton **« 🔍 Miroir »** à côté d'une annonce pro dans le tableau de gauche pour afficher la recherche Particuliers ici.")
