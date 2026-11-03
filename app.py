@@ -7,7 +7,7 @@ import random
 
 # Configuration de la page Streamlit
 st.set_page_config(
-    page_title="Switch Auto — Matcher Miroir Pro/Particulier",
+    page_title="Switch Auto — Matcher Miroir Année Stricte",
     page_icon="🚗",
     layout="wide"
 )
@@ -17,7 +17,6 @@ SECTEUR_LBC = "Roncq_59223__30000"  # Roncq + 30 km
 ANNEE_MIN = 2006
 KM_MAX = 250000
 
-# User-Agents pour la rotation des requêtes
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -25,12 +24,11 @@ USER_AGENTS = [
 ]
 
 def fetch_lbc_pro_ads():
-    """Scraper émulé pour extraire le flux Pros."""
     session = requests.Session()
     headers = {
         "User-Agent": random.choice(USER_AGENTS),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "fr-FR,fr;q=0.9",
         "Referer": "https://www.leboncoin.fr/",
     }
     
@@ -77,35 +75,29 @@ def fetch_lbc_pro_ads():
         
     return pd.DataFrame(vehicles)
 
-# Initialisation de la mémoire d'annonces
 if "pro_data" not in st.session_state:
     st.session_state["pro_data"] = pd.DataFrame()
 
 if "selected_car" not in st.session_state:
     st.session_state["selected_car"] = None
 
-st.title("🚗 Switch Auto — Sourcing Pros & Matcher Miroir")
-st.caption("Filtres MyTrax : Roncq + 30 km | Année ≥ 2006 | KM ≤ 250 000 km")
+st.title("🚗 Switch Auto — Sourcing Pros & Matcher Miroir (Année Stricte)")
+st.caption("Filtres MyTrax : Roncq + 30 km | Année exacte requise chez le particulier (kilométrage libre)")
 
-# Barre latérale : Actions
 st.sidebar.header("🔄 Contrôle du Sourcing")
 if st.sidebar.button("🔄 Rafraîchir les annonces Pros", type="primary"):
-    with st.spinner("Récupération des annonces pros sur Roncq + 30 km..."):
+    with st.spinner("Récupération des annonces pros..."):
         df_fetched = fetch_lbc_pro_ads()
         if len(df_fetched) > 0:
             st.session_state["pro_data"] = df_fetched
             st.sidebar.success(f"{len(df_fetched)} annonces pros récupérées !")
         else:
-            st.sidebar.warning("Sécurité réseau détectée sur l'API globale. Utilisation du mode sécurisé.")
+            st.sidebar.warning("Sécurité réseau détectée. Utilisation du mode sécurisé.")
 
 df_display = st.session_state["pro_data"]
 
-# --- LAYOUT DOUBLE COLONNE ---
 col_left, col_right = st.columns([1.3, 1], gap="large")
 
-# ==============================================================================
-# COLONNE GAUCHE : FLUX DES ANNONCES PROFESSIONNELLES
-# ==============================================================================
 with col_left:
     st.header("📋 Annonces Pros du Secteur (Roncq +30 km)")
     
@@ -130,11 +122,8 @@ with col_left:
                         st.rerun()
                 st.markdown("---")
     else:
-        st.info("Clique sur **« 🔄 Rafraîchir les annonces Pros »** dans le menu de gauche pour charger le catalogue.")
+        st.info("Clique sur **« 🔄 Rafraîchir les annonces Pros »** dans le menu de gauche.")
 
-# ==============================================================================
-# COLONNE DROITE : FENÊTRE MIROIR PARTICULIERS ( SÉCURISÉE & CIBLÉE )
-# ==============================================================================
 with col_right:
     st.header("👤 Recherche Miroir Particuliers")
     
@@ -144,18 +133,15 @@ with col_right:
         make = car["make"]
         model = car["model"]
         year_val = car["year"]
-        km_val = car["km"]
         
         query_encoded = urllib.parse.quote(f"{make} {model}".strip())
         
-        # Construction sécurisée des paramètres (si c'est un nombre valide, on cible strict, sinon on élargit ou laisse vide)
+        # URL LeBonCoin Particuliers — Année Stricte (Kilométrage non restreint pour maximiser les correspondances)
         lbc_part_url = f"https://www.leboncoin.fr/recherche?category=2&owner_type=private&text={query_encoded}&locations={SECTEUR_LBC}"
         if str(year_val).isdigit():
             lbc_part_url += f"&regdate={year_val}-{year_val}"
-        if str(km_val).isdigit():
-            lbc_part_url += f"&mileage={km_val}-{km_val}"
             
-        # La Centrale URL sécurisée
+        # La Centrale URL — Année Stricte uniquement
         lc_params = {
             "makesModelsCommercialNames": f"{make}:{model}",
             "zipCodes": "59220,59000,59100,59200",
@@ -163,9 +149,6 @@ with col_right:
         if str(year_val).isdigit():
             lc_params["yearMin"] = year_val
             lc_params["yearMax"] = year_val
-        if str(km_val).isdigit():
-            lc_params["mileageMin"] = km_val
-            lc_params["mileageMax"] = km_val
             
         lc_part_url = f"https://www.lacentrale.fr/listing?{urllib.parse.urlencode(lc_params)}"
         
@@ -174,8 +157,8 @@ with col_right:
         st.markdown(f"""
         **Critères ciblés (Particuliers Roncq +30 km) :**
         * **Marque / Modèle :** `{make} {model}`
-        * **Année :** `{year_val}`
-        * **Kilométrage :** `{km_val} km`
+        * **Année stricte :** `{year_val}`
+        * **Kilométrage :** `Libre (tous kilométrages)`
         * **Secteur :** `Roncq + 30 km`
         """)
         
@@ -198,7 +181,7 @@ with col_right:
         
         st.info("""
         **💡 Action Prospection :**  
-        Si le véhicule sort publié par un particulier sur le même secteur, tu as identifié le mandat non-exclusif !
+        En gardant l'année exacte et en laissant le kilométrage ouvert chez les particuliers du secteur, tu détectes facilement toutes les annonces directes correspondantes !
         """)
     else:
-        st.warning("👈 Clique sur le bouton **« 🔍 Miroir »** à côté d'une annonce pro dans le tableau de gauche pour afficher la recherche Particuliers ici.")
+        st.warning("👈 Clique sur le bouton **« 🔍 Miroir »** à côté d'une annonce pro pour afficher la recherche Particuliers ici.")
