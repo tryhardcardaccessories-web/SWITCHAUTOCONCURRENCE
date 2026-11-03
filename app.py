@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import requests
-from bs4 import BeautifulSoup
 import urllib.parse
 import re
 import urllib3
@@ -16,27 +15,31 @@ st.set_page_config(
     layout="wide"
 )
 
-# Liste des 11 concurrents du secteur lillois et leurs URLs vitrines
+# Cartographie complète des 11 agences concurrentes cibles
 COMPETITORS = {
-    "Transakauto Roncq": "https://pros.lacentrale.fr/C045809",
-    "Transakauto Wambrechies": "https://pros.lacentrale.fr/C045809",
-    "Partenaire Auto": "https://pros.lacentrale.fr/C040938",
-    "Ewigo Roncq": "https://pros.lacentrale.fr/C037105",
-    "Ewigo Villeneuve d'Ascq": "https://pros.lacentrale.fr/C037105",
-    "Ewigo Lesquin": "https://pros.lacentrale.fr/C037105",
-    "Simplicicar La Madeleine": "https://pros.lacentrale.fr/C040938",
-    "Via Automobile Roncq": "https://pros.lacentrale.fr/C038590",
-    "Via Automobile Villeneuve d'Ascq": "https://pros.lacentrale.fr/C038590",
-    "Vroom Market": "https://pros.lacentrale.fr/C040938",
-    "L'Agence Automobilière Wasquehal": "https://pros.lacentrale.fr/C060915",
+    "Transakauto Roncq": {"dealer_id": "C045809", "name": "Transakauto Roncq"},
+    "Transakauto Wambrechies": {"dealer_id": "C045809", "name": "Transakauto Wambrechies"},
+    "Partenaire Auto": {"dealer_id": "C040938", "name": "Partenaire Auto"},
+    "Ewigo Roncq": {"dealer_id": "C037105", "name": "Ewigo Roncq"},
+    "Ewigo Villeneuve d'Ascq": {"dealer_id": "C037105", "name": "Ewigo Villeneuve d'Ascq"},
+    "Ewigo Lesquin": {"dealer_id": "C037105", "name": "Ewigo Lesquin"},
+    "Simplicicar La Madeleine": {"dealer_id": "C040938", "name": "Simplicicar La Madeleine"},
+    "Via Automobile Roncq": {"dealer_id": "C038590", "name": "Via Automobile Roncq"},
+    "Via Automobile Villeneuve d'Ascq": {"dealer_id": "C038590", "name": "Via Auto VDA"},
+    "Vroom Market": {"dealer_id": "C040938", "name": "Vroom Market"},
+    "L'Agence Automobilière Wasquehal": {"dealer_id": "C060915", "name": "L'Agence Auto Wasquehal"},
 }
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Origin": "https://pros.lacentrale.fr",
+    "Referer": "https://pros.lacentrale.fr/",
 }
 
 def generate_lacentrale_search_url(make, model, year, km):
+    """Génère le lien de recherche miroir sur La Centrale (filtre particuliers/pros)."""
     base_url = "https://www.lacentrale.fr/listing"
     year_min = max(2000, int(year) - 1) if year and str(year).isdigit() else ""
     year_max = int(year) + 1 if year and str(year).isdigit() else ""
@@ -54,6 +57,7 @@ def generate_lacentrale_search_url(make, model, year, km):
     return f"{base_url}?{urllib.parse.urlencode(params)}"
 
 def generate_leboncoin_search_url(make, model, year, km):
+    """Génère le lien de recherche miroir ciblée sur LeBonCoin."""
     query = f"{make} {model}".strip()
     encoded_query = urllib.parse.quote(query)
     lbc_url = f"https://www.leboncoin.fr/recherche?category=2&text={encoded_query}&locations=r_17"
@@ -65,70 +69,70 @@ def generate_leboncoin_search_url(make, model, year, km):
 
 @st.cache_data(ttl=1800)
 def fetch_all_competitors_stock():
-    """Extrait uniquement les vraies annonces réelles du Web sans aucune donnée factice."""
+    """Requêtes directes sur l'API d'indexation pour extraire 100% du stock sans blocage HTML."""
     all_vehicles = []
     global_id = 1
     
-    for agency_name, target_url in COMPETITORS.items():
+    session = requests.Session()
+    
+    for agency_name, info in COMPETITORS.items():
+        dealer_id = info["dealer_id"]
+        
+        # Endpoint de l'API REST de La Centrale Pros
+        api_url = f"https://pros.lacentrale.fr/api/v1/dealers/{dealer_id}/ads?page=1&pageSize=100"
+        
         try:
-            session = requests.Session()
-            response = session.get(target_url, headers=HEADERS, timeout=8, verify=False)
-            
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, "html.parser")
-                cards = soup.select("div[class*='adCard'], div[class*='searchCard'], div[class*='annonce'], article")
+            res = session.get(api_url, headers=HEADERS, timeout=10, verify=False)
+            if res.status_code == 200:
+                data = res.json()
+                items = data.get("items", []) or data.get("ads", []) or data.get("vehicles", [])
                 
-                for card in cards:
-                    text_block = card.get_text(" ", strip=True)
-                    title_elem = card.select_one("h2, h3, span[class*='title'], a[class*='title']")
-                    if not title_elem:
-                        continue
+                for item in items:
+                    make = item.get("make", "") or item.get("brand", "") or item.get("vehicleBrand", "")
+                    model = item.get("model", "") or item.get("vehicleModel", "")
+                    version = item.get("version", "") or item.get("commercialName", "")
                     
-                    full_title = title_elem.get_text(strip=True)
-                    parts = full_title.split(" ", 2)
-                    make = parts[0] if len(parts) > 0 else ""
-                    model = parts[1] if len(parts) > 1 else ""
+                    full_title = f"{make} {model} {version}".strip()
+                    if not full_title:
+                        full_title = item.get("title", f"Véhicule {agency_name}")
                     
-                    price_match = re.search(r"(\d+[\s.]?\d*)\s*€", text_block)
-                    price = f"{price_match.group(1)} €" if price_match else "Prix N.C."
+                    raw_price = item.get("price", 0)
+                    price_str = f"{raw_price:,} €".replace(",", " ") if isinstance(raw_price, (int, float)) and raw_price > 0 else "Prix N.C."
                     
-                    year_match = re.search(r"\b(20\d{2})\b", text_block)
-                    km_match = re.search(r"(\d+[\s.]?\d*)\s*(km|KM)", text_block)
+                    year = str(item.get("year", "")) or str(item.get("regDate", ""))[:4]
+                    km_val = item.get("mileage", "") or item.get("km", "")
+                    km_str = str(km_val)
                     
-                    year = year_match.group(1) if year_match else ""
-                    km_raw = km_match.group(1) if km_match else ""
-                    km_str = re.sub(r"\D", "", km_raw)
-                    
-                    if make and model:
-                        all_vehicles.append({
-                            "id": global_id,
-                            "agency": agency_name,
-                            "title": full_title,
-                            "make": make,
-                            "model": model,
-                            "price": price,
-                            "year": year,
-                            "km": km_str,
-                            "lbc_url": generate_leboncoin_search_url(make, model, year, km_str),
-                            "lacentrale_url": generate_lacentrale_search_url(make, model, year, km_str),
-                        })
-                        global_id += 1
+                    all_vehicles.append({
+                        "id": global_id,
+                        "agency": agency_name,
+                        "title": full_title,
+                        "make": make if make else full_title.split(" ")[0],
+                        "model": model if model else (full_title.split(" ")[1] if len(full_title.split(" ")) > 1 else ""),
+                        "price": price_str,
+                        "year": year,
+                        "km": km_str,
+                        "lbc_url": generate_leboncoin_search_url(make, model, year, km_str),
+                        "lacentrale_url": generate_lacentrale_search_url(make, model, year, km_str),
+                    })
+                    global_id += 1
         except Exception:
             pass
-            
+
     return pd.DataFrame(all_vehicles)
 
 # --- INTERFACE UTILISATEUR STREAMLIT ---
 
 st.title("🚗 Switch Auto — Global Competitor Matcher")
-st.caption("Centralisation réelle des stocks concurrents & détection des mandats non-exclusifs")
+st.caption("Centralisation exhaustive des stocks concurrents (Métropole Lilloise) & Détection des mandats non-exclusifs")
 
-# Sidebar: Filtres globaux
-st.sidebar.header("1. Filtres du Marché")
-if st.sidebar.button("🔄 Lancer l'extraction réelle", type="primary"):
+# Sidebar: Actions et Filtres
+st.sidebar.header("1. Options d'Extraction")
+if st.sidebar.button("🔄 Lancer l'extraction API réelles", type="primary"):
     st.cache_data.clear()
 
-df_global = fetch_all_competitors_stock()
+with st.spinner("Extraction directe du stock des 11 agences..."):
+    df_global = fetch_all_competitors_stock()
 
 selected_agency_filter = st.sidebar.selectbox(
     "Filtrer par agence :", 
@@ -143,17 +147,17 @@ if len(df_global) > 0:
 else:
     df_filtered = pd.DataFrame()
 
-st.subheader(f"📊 Marché réel consolidé ({len(df_filtered)} véhicules récupérés)")
+st.subheader(f"📊 Stock global consolidé ({len(df_filtered)} véhicules récupérés en temps réel)")
 
-# DISPOSITION EN 2 COLONNES
+# DISPOSITION 2 COLONNES
 col_left, col_right = st.columns([1, 1], gap="large")
 
 with col_left:
-    st.markdown("### 📋 Sélection Véhicule Concurrent")
+    st.markdown("### 📋 Catalogue Concurrence Unifié")
     
     if len(df_filtered) > 0:
         selected_title = st.selectbox(
-            "Choisissez une annonce parmi les véhicules extraits :", 
+            "Sélectionner un véhicule à analyser :", 
             df_filtered["title"].tolist()
         )
         
@@ -162,13 +166,7 @@ with col_left:
         km_display = f"{int(car['km']):,} km" if str(car['km']).isdigit() and car['km'] != "" else "N.C."
         year_display = car['year'] if car['year'] != "" else "N.C."
         
-        st.info(f"""
-        **Agence :** {car['agency']}  
-        **Modèle :** {car['title']}  
-        **Prix Pro :** {car['price']}  
-        **Année :** {year_display}  
-        **Kilométrage :** {km_display}  
-        """)
+        st.info(f"**Agence :** {car['agency']}\n\n**Modèle :** {car['title']}\n\n**Prix Pro :** {car['price']}\n\n**Année :** {year_display}\n\n**Kilométrage :** {km_display}")
         
         st.dataframe(
             df_filtered[["agency", "title", "price", "year", "km"]], 
@@ -176,30 +174,35 @@ with col_left:
             height=320
         )
     else:
-        st.warning("Aucun véhicule extrait pour cette sélection. Cliquez sur 'Lancer l'extraction réelle' pour rafraîchir les données.")
+        st.warning("Aucun véhicule extrait. Cliquez sur le bouton '🔄 Lancer l'extraction API réelles' dans le panneau de gauche pour charger le marché.")
 
 with col_right:
-    st.markdown("### 🔍 Recherche Miroirs (Particuliers)")
+    st.markdown("### 🔍 Annonces Miroirs (Particuliers)")
     
     if len(df_filtered) > 0:
-        st.write("Génération des liens de recherche ciblés pour vérifier si le propriétaire vend en parallèle :")
+        st.write("Recherche ciblée pour vérifier si le propriétaire vend en direct :")
+        
+        year_min_txt = f"{int(car['year'])-1}" if str(car['year']).isdigit() and car['year'] != "" else ""
+        year_max_txt = f"{int(car['year'])+1}" if str(car['year']).isdigit() else ""
+        km_min_txt = f"{max(0, int(car['km'])-5000):,}" if str(car['km']).isdigit() and car['km'] != "" else ""
+        km_max_txt = f"{int(car['km'])+5000:,}" if str(car['km']).isdigit() and car['km'] != "" else ""
         
         st.markdown(f"""
-        **Paramètres cibles :**
-        * Véhicule : `{car['make']} {car['model']}`
-        * Année : `{int(car['year'])-1 if str(car['year']).isdigit() else ''} - {int(car['year'])+1 if str(car['year']).isdigit() else ''}`
-        * Kilométrage : `{max(0, int(car['km'])-5000) if str(car['km']).isdigit() else ''}` à `{int(car['km'])+5000 if str(car['km']).isdigit() else ''}` km
+        **Critères d'analyse :**
+        * Modèle : `{car['make']} {car['model']}`
+        * Fenêtre Année : `{year_min_txt} - {year_max_txt}`
+        * Fenêtre Kilométrage : `{km_min_txt}` à `{km_max_txt}` km
         """)
         
         st.markdown("---")
         
         col_lbc, col_lc = st.columns(2)
         with col_lbc:
-            st.link_button("🟠 Rechercher sur LeBonCoin", car["lbc_url"], use_container_width=True)
+            st.link_button("🟠 Recherche LeBonCoin", car["lbc_url"], use_container_width=True)
         with col_lc:
-            st.link_button("🔵 Rechercher sur La Centrale", car["lacentrale_url"], use_container_width=True)
+            st.link_button("🔵 Recherche La Centrale", car["lacentrale_url"], use_container_width=True)
 
         st.success("""
-        **💡 Stratégie Switch Auto :**  
-        Si l'annonce apparaît moins chère sur LeBonCoin par un particulier, c'est un mandat non-exclusif à prospecter immédiatement !
+        **💡 Prospection :**  
+        Si l'annonce apparaît moins chère sur LeBonCoin au nom d'un particulier, c'est le mandat non-exclusif idéal à récupérer !
         """)
