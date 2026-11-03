@@ -4,11 +4,10 @@ import urllib.parse
 import re
 import requests
 import random
-import time
 
 # Configuration de la page Streamlit
 st.set_page_config(
-    page_title="Switch Auto — Matcher Miroir Pro/Particulier",
+    page_title="Switch Auto — Matcher Miroir Exact Pro/Particulier",
     page_icon="🚗",
     layout="wide"
 )
@@ -26,7 +25,7 @@ USER_AGENTS = [
 ]
 
 def fetch_lbc_pro_ads():
-    """Scraper tolérant les protections anti-bot pour extraire le flux Pros."""
+    """Scraper émulé pour extraire le flux Pros."""
     session = requests.Session()
     headers = {
         "User-Agent": random.choice(USER_AGENTS),
@@ -42,7 +41,6 @@ def fetch_lbc_pro_ads():
         res = session.get(url, headers=headers, timeout=10)
         if res.status_code == 200:
             html = res.text
-            # Découpage du HTML pour extraire le JSON embarqué (__NEXT_DATA__)
             json_match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html)
             if json_match:
                 import json
@@ -86,8 +84,8 @@ if "pro_data" not in st.session_state:
 if "selected_car" not in st.session_state:
     st.session_state["selected_car"] = None
 
-st.title("🚗 Switch Auto — Sourcing Pros & Matcher Miroir Automatique")
-st.caption("AutoScout CRM Mode : Roncq + 30 km | Année ≥ 2006 | KM ≤ 250 000 km")
+st.title("🚗 Switch Auto — Sourcing Pros & Matcher Miroir Exact")
+st.caption("Filtres MyTrax : Roncq + 30 km | Année ≥ 2006 | KM ≤ 250 000 km | Année & Kilométrage stricts")
 
 # Barre latérale : Actions
 st.sidebar.header("🔄 Contrôle du Scraper")
@@ -114,7 +112,6 @@ with col_left:
     if len(df_display) > 0:
         st.write("Clique sur **« 🔍 Miroir »** pour afficher la recherche Particulier à droite :")
         
-        # Affichage sous forme de tableau interactif avec boutons par ligne
         for idx, row in df_display.iterrows():
             with st.container():
                 c1, c2, c3, c4, c5 = st.columns([3, 1.5, 1.5, 1.5, 2])
@@ -136,45 +133,39 @@ with col_left:
         st.info("Clique sur **« 🔄 Lancer / Rafraîchir les annonces Pros »** dans le menu de gauche pour charger le catalogue automatique.")
 
 # ==============================================================================
-# COLONNE DROITE : FENÊTRE MIROIR PARTICULIERS (SE DÉCLENCHE AU CLIC)
+# COLONNE DROITE : FENÊTRE MIROIR PARTICULIERS (EXACTE)
 # ==============================================================================
 with col_right:
-    st.header("👤 Recherche Miroir Particuliers")
+    st.header("👤 Recherche Miroir Particuliers (Critères Exacts)")
     
     car = st.session_state["selected_car"]
     
     if car is not None:
         make = car["make"]
         model = car["model"]
-        year_val = int(car["year"]) if str(car["year"]).isdigit() else 2015
-        km_val = int(car["km"]) if str(car["km"]).isdigit() else 100000
-        
-        # Plages de tolérance (+/- 1 an et +/- 5 000 km)
-        year_min = max(2006, year_val - 1)
-        year_max = year_val + 1
-        km_min = max(0, km_val - 5000)
-        km_max = min(250000, km_val + 5000)
+        year_exact = str(car["year"]).strip()
+        km_exact = str(car["km"]).strip()
         
         query_encoded = urllib.parse.quote(f"{make} {model}".strip())
         
-        # URL LeBonCoin Particuliers ciblée
+        # URL LeBonCoin Particuliers — Année et Kilométrage stricts
         lbc_part_url = (
             f"https://www.leboncoin.fr/recherche?"
             f"category=2"
             f"&owner_type=private"
             f"&text={query_encoded}"
-            f"&regdate={year_min}-{year_max}"
-            f"&mileage={km_min}-{km_max}"
+            f"&regdate={year_exact}-{year_exact}"
+            f"&mileage={km_exact}-{km_exact}"
             f"&locations={SECTEUR_LBC}"
         )
         
-        # URL La Centrale Particuliers
+        # URL La Centrale Particuliers — Année et Kilométrage stricts
         lc_params = {
             "makesModelsCommercialNames": f"{make}:{model}",
-            "yearMin": year_min,
-            "yearMax": year_max,
-            "mileageMin": km_min,
-            "mileageMax": km_max,
+            "yearMin": year_exact,
+            "yearMax": year_exact,
+            "mileageMin": km_exact,
+            "mileageMax": km_exact,
             "zipCodes": "59220,59000,59100,59200",
         }
         lc_part_url = f"https://www.lacentrale.fr/listing?{urllib.parse.urlencode(lc_params)}"
@@ -182,12 +173,12 @@ with col_right:
         st.success(f"🎯 **Cible sélectionnée :** {car['title']}")
         
         st.markdown(f"""
-        **Critères de recherche Particuliers appliqués :**
+        **Critères miroirs stricts (Particuliers Roncq +30 km) :**
         * **Marque / Modèle :** `{make} {model}`
-        * **Tranche d'Année :** `{year_min} - {year_max}`
-        * **Tranche Kilométrage :** `{km_min:,}` à `{km_max:,}` km
+        * **Année exacte :** `{year_exact}`
+        * **Kilométrage exact :** `{km_exact}` km
         * **Secteur :** `Roncq + 30 km`
-        """.replace(",", " "))
+        """)
         
         st.markdown("---")
         
@@ -208,7 +199,7 @@ with col_right:
         
         st.info("""
         **💡 Action Prospection :**  
-        Si le véhicule sort publié par un particulier sur le même secteur à un tarif inférieur, tu as identifié le mandat non-exclusif !
+        Si le véhicule sort publié par un particulier sur le même secteur avec cette année et ce kilométrage exacts, c'est le mandat non-exclusif direct !
         """)
     else:
         st.warning("👈 Clique sur le bouton **« 🔍 Miroir »** à côté d'une annonce pro dans le tableau de gauche pour faire poper sa recherche Particuliers ici.")
