@@ -1,11 +1,12 @@
 import streamlit as st
 import pandas as pd
 import requests
+from bs4 import BeautifulSoup
 import urllib.parse
 import re
 import urllib3
 
-# Désactivation des avertissements SSL pour les requêtes aux sites tiers
+# Désactivation des avertissements SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Configuration de la page Streamlit
@@ -15,10 +16,10 @@ st.set_page_config(
     layout="wide"
 )
 
-# Liste exhaustive des 11 concurrents du secteur lillois
+# Liste des 11 concurrents du secteur lillois et leurs URLs vitrines
 COMPETITORS = {
     "Transakauto Roncq": "https://pros.lacentrale.fr/C045809",
-    "Transakauto Wambrechies": "https://pros.lacentrale.fr/C045809", # Vitrine régionale associée
+    "Transakauto Wambrechies": "https://pros.lacentrale.fr/C045809",
     "Partenaire Auto": "https://pros.lacentrale.fr/C040938",
     "Ewigo Roncq": "https://pros.lacentrale.fr/C037105",
     "Ewigo Villeneuve d'Ascq": "https://pros.lacentrale.fr/C037105",
@@ -64,12 +65,11 @@ def generate_leboncoin_search_url(make, model, year, km):
 
 @st.cache_data(ttl=1800)
 def fetch_all_competitors_stock():
-    """Extrait et consolide l'ensemble des stocks de toutes les agences."""
+    """Extrait uniquement les vraies annonces réelles du Web sans aucune donnée factice."""
     all_vehicles = []
     global_id = 1
     
     for agency_name, target_url in COMPETITORS.items():
-        agency_vehicles = []
         try:
             session = requests.Session()
             response = session.get(target_url, headers=HEADERS, timeout=8, verify=False)
@@ -95,12 +95,12 @@ def fetch_all_competitors_stock():
                     year_match = re.search(r"\b(20\d{2})\b", text_block)
                     km_match = re.search(r"(\d+[\s.]?\d*)\s*(km|KM)", text_block)
                     
-                    year = year_match.group(1) if year_match else "2018"
-                    km_raw = km_match.group(1) if km_match else "85000"
+                    year = year_match.group(1) if year_match else ""
+                    km_raw = km_match.group(1) if km_match else ""
                     km_str = re.sub(r"\D", "", km_raw)
                     
                     if make and model:
-                        agency_vehicles.append({
+                        all_vehicles.append({
                             "id": global_id,
                             "agency": agency_name,
                             "title": full_title,
@@ -108,7 +108,7 @@ def fetch_all_competitors_stock():
                             "model": model,
                             "price": price,
                             "year": year,
-                            "km": km_str if km_str else "85000",
+                            "km": km_str,
                             "lbc_url": generate_leboncoin_search_url(make, model, year, km_str),
                             "lacentrale_url": generate_lacentrale_search_url(make, model, year, km_str),
                         })
@@ -116,41 +116,16 @@ def fetch_all_competitors_stock():
         except Exception:
             pass
             
-        # Données de remplissage robustes par agence si le HTML direct est protégé
-        if not agency_vehicles:
-            demo_items = [
-                ("PEUGEOT 308 II 1.2 PureTech", "Peugeot", "308", "13 990 €", "2018", "78000"),
-                ("BMW Série 3 318i Euro 6", "BMW", "318", "21 000 €", "2017", "128000"),
-                ("RENAULT CLIO V TCe", "Renault", "Clio", "14 490 €", "2020", "54000"),
-                ("VOLKSWAGEN GOLF VII TDI", "Volkswagen", "Golf", "16 500 €", "2019", "92000"),
-            ]
-            for item in demo_items:
-                all_vehicles.append({
-                    "id": global_id,
-                    "agency": agency_name,
-                    "title": f"{item[0]}",
-                    "make": item[1],
-                    "model": item[2],
-                    "price": item[3],
-                    "year": item[4],
-                    "km": item[5],
-                    "lbc_url": generate_leboncoin_search_url(item[1], item[2], item[4], item[5]),
-                    "lacentrale_url": generate_lacentrale_search_url(item[1], item[2], item[4], item[5]),
-                })
-                global_id += 1
-        else:
-            all_vehicles.extend(agency_vehicles)
-            
     return pd.DataFrame(all_vehicles)
 
 # --- INTERFACE UTILISATEUR STREAMLIT ---
 
 st.title("🚗 Switch Auto — Global Competitor Matcher")
-st.caption("Centralisation exhaustive des 11 agences concurrentes & détection des mandats non-exclusifs")
+st.caption("Centralisation réelle des stocks concurrents & détection des mandats non-exclusifs")
 
 # Sidebar: Filtres globaux
 st.sidebar.header("1. Filtres du Marché")
-if st.sidebar.button("🔄 Rafraîchir toutes les données", type="primary"):
+if st.sidebar.button("🔄 Lancer l'extraction réelle", type="primary"):
     st.cache_data.clear()
 
 df_global = fetch_all_competitors_stock()
@@ -160,12 +135,15 @@ selected_agency_filter = st.sidebar.selectbox(
     ["Toutes les agences"] + list(COMPETITORS.keys())
 )
 
-if selected_agency_filter != "Toutes les agences":
-    df_filtered = df_global[df_global["agency"] == selected_agency_filter].reset_index(drop=True)
+if len(df_global) > 0:
+    if selected_agency_filter != "Toutes les agences":
+        df_filtered = df_global[df_global["agency"] == selected_agency_filter].reset_index(drop=True)
+    else:
+        df_filtered = df_global
 else:
-    df_filtered = df_global
+    df_filtered = pd.DataFrame()
 
-st.subheader(f"📊 Marché global consolidé ({len(df_filtered)} véhicules référencés)")
+st.subheader(f"📊 Marché réel consolidé ({len(df_filtered)} véhicules récupérés)")
 
 # DISPOSITION EN 2 COLONNES
 col_left, col_right = st.columns([1, 1], gap="large")
@@ -175,50 +153,15 @@ with col_left:
     
     if len(df_filtered) > 0:
         selected_title = st.selectbox(
-            "Choisissez une annonce dans le catalogue unifié :", 
+            "Choisissez une annonce parmi les véhicules extraits :", 
             df_filtered["title"].tolist()
         )
         
         car = df_filtered[df_filtered["title"] == selected_title].iloc[0]
         
+        km_display = f"{int(car['km']):,} km" if str(car['km']).isdigit() and car['km'] != "" else "N.C."
+        year_display = car['year'] if car['year'] != "" else "N.C."
+        
         st.info(f"""
         **Agence :** {car['agency']}  
-        **Modèle :** {car['title']}  
-        **Prix Pro :** {car['price']}  
-        **Année :** {car['year']}  
-        **Kilométrage :** {int(car['km']) if str(car['km']).isdigit() else 0:,} km  
-        """)
-        
-        st.dataframe(
-            df_filtered[["agency", "title", "price", "year", "km"]], 
-            use_container_width=True, 
-            height=320
-        )
-    else:
-        st.warning("Aucun véhicule trouvé avec ce filtre.")
-
-with col_right:
-    st.markdown("### 🔍 Recherche Miroirs (Particuliers)")
-    
-    if len(df_filtered) > 0:
-        st.write("Génération instantanée des liens de recherche pour identifier si le propriétaire tente de vendre en direct :")
-        
-        st.markdown(f"""
-        **Paramètres cibles :**
-        * Véhicule : `{car['make']} {car['model']}`
-        * Année : `{int(car['year'])-1 if str(car['year']).isdigit() else ''} - {int(car['year'])+1 if str(car['year']).isdigit() else ''}`
-        * Kilométrage : `{max(0, int(car['km'])-5000) if str(car['km']).isdigit() else ''}` à `{int(car['km'])+5000 if str(car['km']).isdigit() else ''}` km
-        """)
-        
-        st.markdown("---")
-        
-        col_lbc, col_lc = st.columns(2)
-        with col_lbc:
-            st.link_button("🟠 Rechercher sur LeBonCoin", car["lbc_url"], use_container_width=True)
-        with col_lc:
-            st.link_button("🔵 Rechercher sur La Centrale", car["lacentrale_url"], use_container_width=True)
-
-        st.success("""
-        **💡 Stratégie Switch Auto :**  
-        Vérifie si l'annonce apparaît moins chère sur LeBoncoin par un particulier. Si c'est le cas, c'est un mandat non-exclusif à prospecter en priorité !
-        """)
+        **Modèle :** {
