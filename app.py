@@ -1,172 +1,89 @@
 import streamlit as st
 import pandas as pd
 import urllib.parse
-import re
-import requests
-import random
 
 # Configuration de la page Streamlit
 st.set_page_config(
-    page_title="Switch Auto — Radar Mandats Simples",
+    page_title="Switch Auto — Radar Concurrence Google Sheets",
     page_icon="🚗",
     layout="wide"
 )
 
-# --- CONSTANTES & BOUTIQUES LOCALES ---
+# --- CONFIGURATION GOOGLE SHEETS ---
+# ID extrait de ton lien de partage
+SHEET_ID = "1l4CPiJ11n-zhB5RYsAHqOjp5Y7Mm2NOoTlihNAvrTCg"
+SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
+
 SECTEUR_LBC = "Roncq_59223__30000"  # Roncq + 30 km
 
-# Dictionnaire des boutiques cibles du secteur
-BOUTIQUES_PROS = {
-    "Transakauto Roncq": "https://www.leboncoin.fr/boutique/7447928",
-    "EWIGO Roncq": "https://www.leboncoin.fr/boutique/7145725/ewigo_roncq.htm",
-    "EWIGO Lille - Villeneuve-d'Ascq": "https://www.leboncoin.fr/boutique/7032084/ewigo_lille_villeneuve_dascq.htm",
-    "Auto Transit / Concessionnaires Roncq": "https://www.leboncoin.fr/boutique/2761627/auto_transit.htm",
-}
-
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-]
-
-def fetch_boutique_ads(boutique_url):
-    """Récupère les annonces d'une boutique pro spécifique."""
-    session = requests.Session()
-    headers = {
-        "User-Agent": random.choice(USER_AGENTS),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "fr-FR,fr;q=0.9",
-        "Referer": "https://www.leboncoin.fr/",
-    }
-    
-    vehicles = []
+@st.cache_data(ttl=60) # Cache de 60 secondes pour rafraîchir en direct si tu modifies ton Sheets
+def load_sheet_data():
+    """Charge les données directement depuis ton Google Sheets 'Concurrence Switch Auto'."""
     try:
-        res = session.get(boutique_url, headers=headers, timeout=10)
-        if res.status_code == 200:
-            html = res.text
-            json_match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html)
-            if json_match:
-                import json
-                data = json.loads(json_match.group(1))
-                # Extraction sécurisée depuis les données de la boutique
-                ads = data.get("props", {}).get("pageProps", {}).get("ads", []) or data.get("props", {}).get("pageProps", {}).get("searchData", {}).get("ads", [])
-                
-                for ad in ads:
-                    title = ad.get("subject", "")
-                    price = ad.get("price", [0])[0] if isinstance(ad.get("price"), list) else ad.get("price", 0)
-                    url_ad = ad.get("url", "")
-                    attributes = {attr.get("key"): attr.get("value") for attr in ad.get("attributes", [])}
-                    
-                    make = attributes.get("brand", "")
-                    model = attributes.get("model", "")
-                    year = attributes.get("regdate", "")
-                    km = attributes.get("mileage", "")
-                    
-                    if not make and title:
-                        parts = title.split()
-                        make = parts[0] if len(parts) > 0 else "Auto"
-                        model = parts[1] if len(parts) > 1 else ""
+        df = pd.read_csv(SHEET_URL)
+        # Nettoyage des noms de colonnes (minuscules et sans espaces)
+        df.columns = [c.strip().lower() for c in df.columns]
+        return df
+    except Exception as e:
+        st.error(f"Erreur de lecture du Google Sheets : {e}")
+        return pd.DataFrame()
 
-                    vehicles.append({
-                        "title": title,
-                        "make": make,
-                        "model": model,
-                        "price": f"{price:,} €".replace(",", " ") if price else "N.C.",
-                        "year": str(year) if year else "N.C.",
-                        "km": str(km) if km else "N.C.",
-                        "url_pro": url_ad if url_ad.startswith("http") else f"https://www.leboncoin.fr{url_ad}"
-                    })
-    except Exception:
-        pass
-        
-    return pd.DataFrame(vehicles)
-
-# Initialisation des états de session
-if "pro_data" not in st.session_state:
-    st.session_state["pro_data"] = pd.DataFrame()
-
+# Initialisation de la sélection
 if "selected_car" not in st.session_state:
     st.session_state["selected_car"] = None
 
-st.title("🚗 Switch Auto — Radar Mandats Simples (Boutiques Pro)")
-st.caption("Secteur Roncq + 30 km | Cible : Concurrence Mandataire vs Particuliers")
+st.title("🚗 Switch Auto — Radar Mandats Simples (Google Sheets)")
+st.caption("Base de données centralisée : Concurrence Roncq + 30 km")
 
-# --- BARRE LATÉRALE : SÉLECTION DE LA BOUTIQUE ---
-st.sidebar.header("1. Choix de la Boutique Pro")
-selected_boutique_name = st.sidebar.selectbox("Sélectionne une agence concurrente :", list(BOUTIQUES_PROS.keys()))
-selected_boutique_url = BOUTIQUES_PROS[selected_boutique_name]
+# Barre latérale : Infos et lien direct vers le Sheet
+st.sidebar.header("📁 Source des données")
+st.sidebar.markdown(f"[🔗 Ouvrir ton Google Sheets 'Concurrence'](https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit)")
 
-st.sidebar.markdown(f"[🔗 Ouvrir la page de l'agence]({selected_boutique_url})")
+if st.sidebar.button("🔄 Rafraîchir les données du Sheets", type="primary"):
+    st.cache_data.clear()
+    st.rerun()
 
-if st.sidebar.button("📥 Charger le stock de cette agence", type="primary"):
-    with st.spinner(f"Récupération du portefeuille de {selected_boutique_name}..."):
-        df_fetched = fetch_boutique_ads(selected_boutique_url)
-        if len(df_fetched) > 0:
-            st.session_state["pro_data"] = df_fetched
-            st.sidebar.success(f"🎉 {len(df_fetched)} véhicules chargés !")
-        else:
-            st.sidebar.warning("Sécurité active sur cette boutique. Utilise le lien direct ci-dessus pour consulter la page.")
-
-# Option de secours : Copier-coller si la boutique bloque
-st.sidebar.markdown("---")
-st.sidebar.subheader("Alternative (Copier-Coller)")
-raw_paste = st.sidebar.text_area("Ou colle le texte de la page Pro ici :", height=100)
-if st.sidebar.button("Traiter le texte collé"):
-    if raw_paste:
-        # Parsing rapide du texte collé
-        lines = [l.strip() for l in raw_paste.split("\n") if l.strip()]
-        vehicles = []
-        for line in lines:
-            if "€" in line:
-                vehicles.append({
-                    "title": line,
-                    "make": line.split()[0] if len(line.split()) > 0 else "Auto",
-                    "model": line.split()[1] if len(line.split()) > 1 else "",
-                    "price": line,
-                    "year": "2015",
-                    "km": "100000",
-                    "url_pro": selected_boutique_url
-                })
-        st.session_state["pro_data"] = pd.DataFrame(vehicles)
-        st.sidebar.success("Texte analysé !")
-
-df_display = st.session_state["pro_data"]
+# Chargement du DataFrame depuis le Sheets
+df_pros = load_sheet_data()
 
 # --- LAYOUT EN DEUX COLONNES ---
 col_left, col_right = st.columns([1.3, 1], gap="large")
 
 # ==============================================================================
-# COLONNE GAUCHE : PORTEFEUILLE DE L'AGENCE PRO
+# COLONNE GAUCHE : TABLEAU DES PROS (ISSU DU SHEETS)
 # ==============================================================================
 with col_left:
-    st.header(f"📋 Portefeuille : {selected_boutique_name}")
+    st.header("📋 Véhicules Concurrence (Secteur Roncq)")
     
-    if len(df_display) > 0:
-        st.write("Clique sur **« 🔍 Miroir »** pour lancer la chasse au particulier en face :")
+    if len(df_pros) > 0:
+        st.write("Sélectionne un véhicule pour lancer sa recherche miroir :")
         
-        for idx, row in df_display.iterrows():
+        for idx, row in df_pros.iterrows():
             with st.container():
-                c1, c2, c3, c4, c5 = st.columns([3, 1.5, 1.5, 1.5, 2])
+                # Récupération sécurisée des colonnes
+                title = row.get("title", "Véhicule sans titre")
+                make = row.get("make", "")
+                model = row.get("model", "")
+                year = row.get("year", "")
+                
+                c1, c2, c3, c4 = st.columns([3, 1.5, 1.5, 1.5])
                 with c1:
-                    st.markdown(f"**{row['title']}**")
-                    if row['url_pro'].startswith("http"):
-                        st.caption(f"[🔗 Voir l'annonce Pro]({row['url_pro']})")
+                    st.markdown(f"**{title}**")
+                    st.caption(f"{make} {model}")
                 with c2:
-                    st.write(f"💰 {row['price']}")
+                    st.write(f"📅 {year}")
                 with c3:
-                    st.write(f"📅 {row['year']}")
+                    st.write("Secteur Roncq")
                 with c4:
-                    st.write(f"🛣️ {row['km']} km")
-                with c5:
                     if st.button("🔍 Miroir", key=f"btn_{idx}", type="secondary"):
                         st.session_state["selected_car"] = row
                         st.rerun()
                 st.markdown("---")
     else:
-        st.info("👈 Sélectionne une agence dans le menu de gauche et clique sur **« Charger le stock »** pour afficher ses véhicules.")
+        st.warning("⚠️ Ton Google Sheets semble vide ou inaccessible. Vérifie qu'il contient bien les colonnes `title`, `make`, `model`, `year` et qu'il est partagé en mode public.")
 
 # ==============================================================================
-# COLONNE DROITE : RECHERCHE MIROIR PARTICULIER
+# COLONNE DROITE : FENÊTRE MIROIR PARTICULIER
 # ==============================================================================
 with col_right:
     st.header("👤 Recherche Miroir Particulier")
@@ -174,41 +91,42 @@ with col_right:
     car = st.session_state["selected_car"]
     
     if car is not None:
-        make = car["make"]
-        model = car["model"]
-        year_val = car["year"]
+        title = car.get("title", "")
+        make = str(car.get("make", "")).strip()
+        model = str(car.get("model", "")).strip()
+        year_val = str(car.get("year", "")).strip()
+        
+        st.success(f"🎯 **Cible sélectionnée :** {title}")
+        
+        st.markdown(f"""
+        **Critères de recherche miroir appliqués :**
+        * **Marque / Modèle :** `{make} {model}`
+        * **Année stricte :** `{year_val}`
+        * **Secteur :** `Roncq + 30 km`
+        """)
         
         query_encoded = urllib.parse.quote(f"{make} {model}".strip())
         
-        # Construction du lien miroir LeBonCoin Particuliers (Année stricte, kilométrage libre pour ne pas rater l'annonce)
+        # URL LeBonCoin Particuliers (Année exacte)
         lbc_part_url = f"https://www.leboncoin.fr/recherche?category=2&owner_type=private&text={query_encoded}&locations={SECTEUR_LBC}"
-        if str(year_val).isdigit():
+        if year_val.isdigit():
             lbc_part_url += f"&regdate={year_val}-{year_val}"
             
-        # La Centrale Particuliers
+        # URL La Centrale Particuliers (Année exacte)
         lc_params = {
             "makesModelsCommercialNames": f"{make}:{model}",
             "zipCodes": "59220,59000,59100,59200",
         }
-        if str(year_val).isdigit():
+        if year_val.isdigit():
             lc_params["yearMin"] = year_val
             lc_params["yearMax"] = year_val
             
         lc_part_url = f"https://www.lacentrale.fr/listing?{urllib.parse.urlencode(lc_params)}"
         
-        st.success(f"🎯 **Cible :** {car['title']}")
-        
-        st.markdown(f"""
-        **Paramètres du miroir (Secteur Roncq +30 km) :**
-        * **Modèle :** `{make} {model}`
-        * **Année :** `{year_val}`
-        * **Kilométrage :** `Libre (pour capturer les écarts de saisie)`
-        """)
-        
         st.markdown("---")
         
         st.link_button(
-            f"🟠 🔍 Lancer Miroir LeBonCoin (Particuliers)", 
+            f"🟠 🔍 Ouvrir Miroir LeBonCoin (Particuliers)", 
             lbc_part_url, 
             use_container_width=True, 
             type="primary"
@@ -217,14 +135,13 @@ with col_right:
         st.write("")
         
         st.link_button(
-            f"🔵 🔍 Lancer Miroir La Centrale (Particuliers)", 
+            f"🔵 🔍 Ouvrir Miroir La Centrale (Particuliers)", 
             lc_part_url, 
             use_container_width=True
         )
         
         st.info("""
-        **💡 Conseil Prospection :**  
-        Si l'annonce du particulier sort sur le secteur avec cette année-là, tu tiens ton mandat non-exclusif à aller chercher !
+        💡 **Rappel Mission :** Si l'annonce du particulier apparaît sur LeBonCoin avec cette année-là sur le secteur, tu as ton mandat simple à prospecter en direct !
         """)
     else:
-        st.warning("👈 Clique sur le bouton **« 🔍 Miroir »** à côté d'un véhicule à gauche pour afficher les liens de recherche ici.")
+        st.warning("👈 Clique sur le bouton **« 🔍 Miroir »** à gauche pour afficher les liens de recherche correspondants ici.")
