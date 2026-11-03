@@ -1,152 +1,141 @@
 import streamlit as st
-import pandas as pd
 import urllib.parse
-import re
 
 # Configuration de la page Streamlit
 st.set_page_config(
-    page_title="Switch Auto — Analyseur de Boutique Concurrente",
+    page_title="Switch Auto — Prospection Miroir MyTrax",
     page_icon="🚗",
     layout="wide"
 )
 
-def generate_lacentrale_search_url(make, model, year, km):
-    base_url = "https://www.lacentrale.fr/listing"
-    year_min = max(2000, int(year) - 1) if str(year).isdigit() and year else ""
-    year_max = int(year) + 1 if str(year).isdigit() and year else ""
-    km_min = max(0, int(km) - 5000) if str(km).isdigit() and km else ""
-    km_max = int(km) + 5000 if str(km).isdigit() and km else ""
-    
-    params = {
-        "makesModelsCommercialNames": f"{make}:{model}",
-        "yearMin": year_min,
-        "yearMax": year_max,
-        "mileageMin": km_min,
-        "mileageMax": km_max,
-        "zipCodes": "59000",
-    }
-    return f"{base_url}?{urllib.parse.urlencode(params)}"
+st.title("🚗 Switch Auto — Sourcing Pros & Matcher Miroir Particuliers")
+st.caption("Mécanique MyTrax : Filtre Pro à gauche ➔ Recherche Miroir Particulier à droite")
 
-def generate_leboncoin_search_url(make, model, year, km):
-    query = f"{make} {model}".strip()
-    encoded_query = urllib.parse.quote(query)
-    lbc_url = f"https://www.leboncoin.fr/recherche?category=2&text={encoded_query}&locations=r_17"
-    if str(year).isdigit() and year:
-        lbc_url += f"&regdate={int(year)-1}-{int(year)+1}"
-    if str(km).isdigit() and km:
-        lbc_url += f"&mileage={max(0, int(km)-5000)}-{int(km)+5000}"
-    return lbc_url
+# --- PARAMÈTRES FIXES MYTRAX ---
+SECTEUR_LBC = "Roncq_59223__30000" # Roncq + 30 km
+ANNEE_MIN_MYTRAX = 2006
+KM_MAX_MYTRAX = 250000
 
-def parse_raw_text_input(raw_text, agency_name):
-    """Analyse du texte copié depuis la page boutique pour extraire les annonces."""
-    vehicles = []
-    lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
+# DISPOSITION EN 2 COLONNES PRINCIPALES
+col_pros, col_miroir = st.columns([1, 1], gap="large")
+
+# ==============================================================================
+# COLONNE GAUCHE : RECHERCHE PROS & CRITÈRES MYTRAX
+# ==============================================================================
+with col_pros:
+    st.header("1. 🏬 Feed Annonces PROS (MyTrax)")
+    st.info("""
+    **🎯 Filtres d'éligibilité MyTrax appliqués :**
+    * **Vendeurs :** Professionnels uniquement
+    * **Zone :** Roncq + 30 km aux alentours
+    * **Critères :** Année ≥ 2006 | Kilométrage ≤ 250 000 km | Origine France
+    """)
     
-    for line in lines:
-        price_m = re.search(r"(\d+[\s.]?\d*)\s*€", line)
-        year_m = re.search(r"\b(20\d{2})\b", line)
-        km_m = re.search(r"(\d+[\s.]?\d*)\s*(km|KM)", line)
+    # URL globale de prospection LeBonCoin Pros (Filtrée MyTrax)
+    lbc_global_pro_url = (
+        f"https://www.leboncoin.fr/recherche?"
+        f"category=2"
+        f"&owner_type=pro"
+        f"&regdate={ANNEE_MIN_MYTRAX}-max"
+        f"&mileage=min-{KM_MAX_MYTRAX}"
+        f"&locations={SECTEUR_LBC}"
+    )
+
+    st.markdown("### 🔍 Accès direct au catalogue Pro local")
+    st.link_button(
+        "🔍 Ouvrir LeBonCoin — Toutes les annonces PROS (Roncq +30km)", 
+        lbc_global_pro_url, 
+        use_container_width=True,
+        type="primary"
+    )
+    
+    st.markdown("---")
+    st.markdown("### 📋 Saisie rapide du véhicule Pro repéré")
+    st.caption("Renseigne ici les 4 éléments de l'annonce pro pour lancer le miroir :")
+    
+    c_make, c_model = st.columns(2)
+    with c_make:
+        make = st.text_input("Marque :", placeholder="ex: Peugeot, Dacia, Audi...")
+    with c_model:
+        model = st.text_input("Modèle :", placeholder="ex: 308, Duster, A4...")
         
-        if price_m or year_m or km_m:
-            words = line.split()
-            make = words[0] if len(words) > 0 else "Auto"
-            model = words[1] if len(words) > 1 else ""
-            
-            price = f"{price_m.group(1)} €" if price_m else "N.C."
-            year = year_m.group(1) if year_m else ""
-            km_raw = km_m.group(1) if km_m else ""
-            km_str = re.sub(r"\D", "", km_raw)
-            
-            vehicles.append({
-                "agency": agency_name,
-                "title": line,
-                "make": make,
-                "model": model,
-                "price": price,
-                "year": year,
-                "km": km_str,
-                "lbc_url": generate_leboncoin_search_url(make, model, year, km_str),
-                "lacentrale_url": generate_lacentrale_search_url(make, model, year, km_str),
-            })
-            
-    return pd.DataFrame(vehicles)
+    c_year, c_km = st.columns(2)
+    with c_year:
+        year = st.number_input("Année :", min_value=2006, max_value=2026, value=2016, step=1)
+    with c_km:
+        km = st.number_input("Kilométrage :", min_value=0, max_value=250000, value=110000, step=5000)
 
-# --- INTERFACE UTILISATEUR ---
-
-st.title("🚗 Switch Auto — Analyseur de Boutique Concurrente")
-st.caption("Génération immédiate de liens miroirs à partir des boutiques LeBonCoin / La Centrale")
-
-# Correction de la session state ici
-if "master_stock" not in st.session_state:
-    st.session_state["master_stock"] = pd.DataFrame()
-
-st.sidebar.header("1. Importer une Boutique")
-
-agency_choice = st.sidebar.selectbox(
-    "Agence ciblée :",
-    ["Transakauto Lille / Roncq", "Ewigo", "Simplicicar", "Via Automobile", "Autre"]
-)
-
-st.sidebar.markdown(f"**Lien Boutique :**  \n`https://www.leboncoin.fr/boutique/1385539/transakauto_lille.htm`")
-
-raw_input = st.sidebar.text_area(
-    "Copie-colle le texte de la page boutique ici :",
-    height=150,
-    placeholder="Exemple : Peugeot 308 1.2 PureTech 130ch - 14 500 € - 2019 - 65 000 km..."
-)
-
-if st.sidebar.button("➕ Ajouter au marché", type="primary"):
-    if raw_input:
-        df_new = parse_raw_text_input(raw_input, agency_choice)
-        st.session_state["master_stock"] = pd.concat([st.session_state["master_stock"], df_new], ignore_index=True)
-        st.sidebar.success(f"{len(df_new)} véhicule(s) ajouté(s) !")
-    else:
-        st.sidebar.error("Veuillez coller du texte d'annonce.")
-
-if st.sidebar.button("🗑️ Réinitialiser le marché"):
-    st.session_state["master_stock"] = pd.DataFrame()
-    st.rerun()
-
-df_display = st.session_state["master_stock"]
-
-st.subheader(f"📊 Annonces sous surveillance ({len(df_display)} véhicules)")
-
-if len(df_display) > 0:
-    col_left, col_right = st.columns([1, 1], gap="large")
+# ==============================================================================
+# COLONNE DROITE : RECHERCHE MIROIR PARTICULIERS (SANS PRIX)
+# ==============================================================================
+with col_miroir:
+    st.header("2. 👤 Recherche Miroir PARTICULIERS")
     
-    with col_left:
-        st.markdown("### 📋 Sélection de l'annonce")
-        selected_index = st.selectbox(
-            "Choisissez un véhicule :",
-            range(len(df_display)),
-            format_func=lambda x: f"[{df_display.iloc[x]['agency']}] {df_display.iloc[x]['title']}"
+    if make and model:
+        # Plages de tolérance (+/- 1 an et +/- 5 000 km)
+        year_min = max(2006, int(year) - 1)
+        year_max = int(year) + 1
+        km_min = max(0, int(km) - 5000)
+        km_max = min(250000, int(km) + 5000)
+        
+        query = f"{make} {model}".strip()
+        encoded_query = urllib.parse.quote(query)
+        
+        # URL LeBonCoin PARTICULIERS (Mêmes critères hors prix)
+        lbc_part_url = (
+            f"https://www.leboncoin.fr/recherche?"
+            f"category=2"
+            f"&owner_type=private"
+            f"&text={encoded_query}"
+            f"&regdate={year_min}-{year_max}"
+            f"&mileage={km_min}-{km_max}"
+            f"&locations={SECTEUR_LBC}"
         )
         
-        car = df_display.iloc[selected_index]
-        
-        st.info(f"""
-        **Agence :** {car['agency']}  
-        **Titre :** {car['title']}  
-        **Prix :** {car['price']}  
-        **Année :** {car['year'] if car['year'] else 'N.C.'}  
-        **Kilométrage :** {car['km'] if car['km'] else 'N.C.'} km  
-        """)
-        
-        st.dataframe(df_display[["agency", "title", "price", "year", "km"]], use_container_width=True)
-        
-    with col_right:
-        st.markdown("### 🔍 Recherche Miroirs Directe")
-        st.write("Vérifiez immédiatement si le particulier vend en direct :")
-        
-        col_lbc, col_lc = st.columns(2)
-        with col_lbc:
-            st.link_button("🟠 Recherche LeBonCoin", car["lbc_url"], use_container_width=True)
-        with col_lc:
-            st.link_button("🔵 Recherche La Centrale", car["lacentrale_url"], use_container_width=True)
+        # URL La Centrale PARTICULIERS (Backup)
+        lc_params = {
+            "makesModelsCommercialNames": f"{make}:{model}",
+            "yearMin": year_min,
+            "yearMax": year_max,
+            "mileageMin": km_min,
+            "mileageMax": km_max,
+            "zipCodes": "59220,59000,59100,59200",
+        }
+        lc_part_url = f"https://www.lacentrale.fr/listing?{urllib.parse.urlencode(lc_params)}"
 
-        st.success("""
-        **💡 Astuce Prospection :**  
-        Si l'auto sort sur LeBonCoin au nom d'un particulier à un prix inférieur, c'est un mandat non-exclusif !
+        st.success(f"✅ **Cible activée :** {make} {model} ({year} | {km:,} km)".replace(",", " "))
+        
+        st.markdown(f"""
+        **Paramètres miroirs appliqués (Prix ignoré) :**
+        * **Modèle :** `{make} {model}`
+        * **Fenêtre Année :** `{year_min} - {year_max}`
+        * **Fenêtre Kilométrage :** `{km_min:,}` à `{km_max:,}` km
+        * **Secteur :** `Roncq + 30 km`
+        """.replace(",", " "))
+        
+        st.markdown("---")
+        
+        st.subheader("🔗 Liens de comparaison Particuliers")
+        
+        st.link_button(
+            f"🟠 🔍 LeBonCoin — PARTICULIERS pour {make} {model}", 
+            lbc_part_url, 
+            use_container_width=True,
+            type="primary"
+        )
+        
+        st.write("")
+        
+        st.link_button(
+            f"🔵 🔍 La Centrale — PARTICULIERS pour {make} {model}", 
+            lc_part_url, 
+            use_container_width=True
+        )
+
+        st.info("""
+        **💡 Prospection Switch Auto :**  
+        Si le même véhicule ressort publié par un particulier, tu as identifié le mandat non-exclusif. Tu peux l'appeler directement !
         """)
-else:
-    st.info("Sélectionnez une agence dans le panneau de gauche et collez le contenu de sa boutique LeBonCoin pour générer les liens miroirs instantanément.")
+        
+    else:
+        st.warning("👈 Indique la marque et le modèle du véhicule pro sélectionné à gauche pour générer les liens miroirs particuliers.")
