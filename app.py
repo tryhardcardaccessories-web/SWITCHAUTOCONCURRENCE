@@ -5,7 +5,7 @@ import re
 
 # Configuration de la page Streamlit
 st.set_page_config(
-    page_title="Switch Auto — Matcher Boutique Directe",
+    page_title="Switch Auto — Analyseur de Boutique Concurrente",
     page_icon="🚗",
     layout="wide"
 )
@@ -42,9 +42,7 @@ def parse_raw_text_input(raw_text, agency_name):
     vehicles = []
     lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
     
-    # Analyse par blocs de texte ou lignes d'annonces
-    for i, line in enumerate(lines):
-        # Recherche de motifs typiques d'annonces (Marque + Prix + KM)
+    for line in lines:
         price_m = re.search(r"(\d+[\s.]?\d*)\s*€", line)
         year_m = re.search(r"\b(20\d{2})\b", line)
         km_m = re.search(r"(\d+[\s.]?\d*)\s*(km|KM)", line)
@@ -78,8 +76,8 @@ def parse_raw_text_input(raw_text, agency_name):
 st.title("🚗 Switch Auto — Analyseur de Boutique Concurrente")
 st.caption("Génération immédiate de liens miroirs à partir des boutiques LeBonCoin / La Centrale")
 
-# Stockage de la session
-if "master_stock" not in st.sidebar:
+# Correction de la session state ici
+if "master_stock" not in st.session_state:
     st.session_state["master_stock"] = pd.DataFrame()
 
 st.sidebar.header("1. Importer une Boutique")
@@ -92,7 +90,7 @@ agency_choice = st.sidebar.selectbox(
 st.sidebar.markdown(f"**Lien Boutique :**  \n`https://www.leboncoin.fr/boutique/1385539/transakauto_lille.htm`")
 
 raw_input = st.sidebar.text_area(
-    "Copie-colle le texte de la page boutique ici (Ctrl+A puis Ctrl+C sur la page) :",
+    "Copie-colle le texte de la page boutique ici :",
     height=150,
     placeholder="Exemple : Peugeot 308 1.2 PureTech 130ch - 14 500 € - 2019 - 65 000 km..."
 )
