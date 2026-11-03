@@ -164,4 +164,42 @@ with col_left:
         
         st.info(f"""
         **Agence :** {car['agency']}  
-        **Modèle :** {
+        **Modèle :** {car['title']}  
+        **Prix Pro :** {car['price']}  
+        **Année :** {year_display}  
+        **Kilométrage :** {km_display}  
+        """)
+        
+        st.dataframe(
+            df_filtered[["agency", "title", "price", "year", "km"]], 
+            use_container_width=True, 
+            height=320
+        )
+    else:
+        st.warning("Aucun véhicule extrait pour cette sélection. Cliquez sur 'Lancer l'extraction réelle' pour rafraîchir les données.")
+
+with col_right:
+    st.markdown("### 🔍 Recherche Miroirs (Particuliers)")
+    
+    if len(df_filtered) > 0:
+        st.write("Génération des liens de recherche ciblés pour vérifier si le propriétaire vend en parallèle :")
+        
+        st.markdown(f"""
+        **Paramètres cibles :**
+        * Véhicule : `{car['make']} {car['model']}`
+        * Année : `{int(car['year'])-1 if str(car['year']).isdigit() else ''} - {int(car['year'])+1 if str(car['year']).isdigit() else ''}`
+        * Kilométrage : `{max(0, int(car['km'])-5000) if str(car['km']).isdigit() else ''}` à `{int(car['km'])+5000 if str(car['km']).isdigit() else ''}` km
+        """)
+        
+        st.markdown("---")
+        
+        col_lbc, col_lc = st.columns(2)
+        with col_lbc:
+            st.link_button("🟠 Rechercher sur LeBonCoin", car["lbc_url"], use_container_width=True)
+        with col_lc:
+            st.link_button("🔵 Rechercher sur La Centrale", car["lacentrale_url"], use_container_width=True)
+
+        st.success("""
+        **💡 Stratégie Switch Auto :**  
+        Si l'annonce apparaît moins chère sur LeBonCoin par un particulier, c'est un mandat non-exclusif à prospecter immédiatement !
+        """)
